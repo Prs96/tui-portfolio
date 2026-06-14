@@ -1,13 +1,28 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/charmbracelet/ssh"
+	"github.com/charmbracelet/wish"
+	"github.com/charmbracelet/wish/bubbletea"
+	"github.com/charmbracelet/wish/logging"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+)
+
+// ── SSH server config ─────────────────────────────────────────────────────────
+
+const (
+	sshHost    = "0.0.0.0"
+	sshPort    = "443"
+	hostKeyDir = ".ssh/portfolio_ed25519"
 )
 
 type sessionState int
@@ -73,12 +88,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.state = stateMenu
 			m.cursor = 0
-		case "up", "k":
+		// Added explicit matches for standard ANSI escape sequences common over raw SSH pipes
+		case "up", "k", "\x1b[A":
 			if m.cursor > 0 {
 				m.cursor--
 				m.state = sessionState(m.cursor + 1)
 			}
-		case "down", "j":
+		case "down", "j", "\x1b[B":
 			if m.cursor < len(m.choices)-1 {
 				m.cursor++
 				m.state = sessionState(m.cursor + 1)
@@ -113,8 +129,6 @@ func maxInt(a, b int) int {
 
 // ── ASCII art ─────────────────────────────────────────────────────────────────
 
-// coffeeFrames returns the two animation frames for the coffee cup.
-// Frame 0: steam rising (wispy)  Frame 1: steam shifted (billowy)
 func coffeeFrames() [2][]string {
 	return [2][]string{
 		{
@@ -144,10 +158,7 @@ func coffeeFrames() [2][]string {
 	}
 }
 
-// betterCoffee returns cleaner, fixed-width coffee cup frames.
-// 14 cols wide, 11 rows — aligned with box-drawing for crispness.
 func coffeeArt(frame int) []string {
-	// Steam rows cycle between two phases
 	steams := [2][3]string{
 		{`  ~   ~  ~ `, ` ~   ~   ~ `, `  ~  ~  ~  `},
 		{` ~   ~   ~ `, `  ~   ~  ~ `, ` ~    ~  ~ `},
@@ -168,8 +179,6 @@ func coffeeArt(frame int) []string {
 	}
 }
 
-// pranavASCII returns large block-letter ASCII art for "PRANAV"
-// using simple # blocks, 6 rows tall, each letter ~6 chars wide
 func pranavASCII() []string {
 	return []string{
 		` ██████╗ ██████╗  █████╗ ███╗   ██╗ █████╗ ██╗   ██╗`,
@@ -177,7 +186,7 @@ func pranavASCII() []string {
 		` ██████╔╝██████╔╝███████║██╔██╗ ██║███████║██║   ██║`,
 		` ██╔═══╝ ██╔══██╗██╔══██║██║╚██╗██║██╔══██║╚██╗ ██╔╝`,
 		` ██║     ██║  ██║██║  ██║██║ ╚████║██║  ██║ ╚████╔╝ `,
-		` ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝  ╚═══╝  `,
+		` ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝  ╚═══╝ `,
 	}
 }
 
@@ -196,7 +205,7 @@ func (m model) View() string {
 	muted := lipgloss.Color("#475569")
 	dim := lipgloss.Color("#1E293B")
 	white := lipgloss.Color("#F1F5F9")
-	amber := lipgloss.Color("#FBBF24") // coffee / steam colour
+	amber := lipgloss.Color("#FBBF24")
 
 	// ── Dimensions ───────────────────────────────────────────────────────────
 	sidebarOuter := 28
@@ -219,7 +228,7 @@ func (m model) View() string {
 	selText := lipgloss.NewStyle().Foreground(violet).Bold(true)
 	selMark := lipgloss.NewStyle().Foreground(violet).Bold(true)
 	steamSt := lipgloss.NewStyle().Foreground(amber)
-	cupSt := lipgloss.NewStyle().Foreground(lipgloss.Color("#92400E")) // dark coffee brown
+	cupSt := lipgloss.NewStyle().Foreground(lipgloss.Color("#92400E"))
 	nameSt := lipgloss.NewStyle().Bold(true).Foreground(emerald)
 
 	// ── Sidebar ───────────────────────────────────────────────────────────────
@@ -279,12 +288,10 @@ func (m model) View() string {
 
 	switch m.state {
 
-	// ── Welcome: animated coffee + big ASCII name ─────────────────────────────
 	case stateMenu:
 		cup := coffeeArt(m.frame)
 		name := pranavASCII()
 
-		// Colour each row of the cup: first 3 rows = steam (amber), rest = cup (brown)
 		cupRendered := make([]string, len(cup))
 		for i, row := range cup {
 			if i < 3 {
@@ -294,13 +301,11 @@ func (m model) View() string {
 			}
 		}
 
-		// Colour the name rows with a gradient feel: alternate emerald shades
 		nameRendered := make([]string, len(name))
 		for i, row := range name {
 			nameRendered[i] = nameSt.Render(row)
 		}
 
-		// Centre the cup block inside the content pane
 		cupBlock := strings.Join(cupRendered, "\n")
 		nameBlock := strings.Join(nameRendered, "\n")
 
@@ -311,7 +316,6 @@ func (m model) View() string {
 		content += centreStyle.Render(cupBlock) + "\n\n"
 		content += rule(innerW, dim) + "\n"
 
-		// Curated quotes that cycle every ~5 seconds
 		quotes := []string{
 			"\"The best way to predict the future is to invent it.\"",
 			"\"Simplicity is the ultimate sophistication.\"",
@@ -321,7 +325,6 @@ func (m model) View() string {
 		quoteSt := lipgloss.NewStyle().Foreground(amber).Italic(true).Width(innerW - 4).Align(lipgloss.Center)
 		content += "\n" + centreStyle.Render(quoteSt.Render(quotes[m.quoteIdx]))
 
-	// ── About Me ──────────────────────────────────────────────────────────────
 	case stateAboutMe:
 		content += bodySt.Render("Hi, I'm ") + headSt.Render("Pranav S") +
 			bodySt.Render(", a Computer Science and Engineering student at the ") +
@@ -361,7 +364,6 @@ func (m model) View() string {
 			content += bodySt.Render("  · "+b) + "\n"
 		}
 
-	// ── Projects ──────────────────────────────────────────────────────────────
 	case stateProjects:
 		content += sectionTitle("PROJECTS") + "\n\n"
 
@@ -380,37 +382,37 @@ func (m model) View() string {
 				},
 			},
 			{
-			"Rental Management Platform",
-			"TypeScript · Next.js · Tailwind CSS",
-			"https://github.com/Prs96/rental-management.git",
-			[]string{
-				"High-performance SSR frontend with optimised core web vitals.",
-				"Integrated secure authentication and real-time data fetching by consuming RESTful APIs to manage property listings and user bookings.",
+				"Rental Management Platform",
+				"TypeScript · Next.js · Tailwind CSS",
+				"https://github.com/Prs96/rental-management.git",
+				[]string{
+					"High-performance SSR frontend with optimised core web vitals.",
+					"Integrated secure authentication and real-time data fetching by consuming RESTful APIs to manage property listings and user bookings.",
+				},
 			},
-		},
-		{
-			"Interactive Segmentation",
-			"Python · PyTorch · nnU-Net",
-			"https://github.com/Prs96/Interactive_Segmentation.git",
-			[]string{
-				"Built end-to-end ML pipelines for dental diagnostics and CBCT segmentation.",
-				"Designed a hybrid nnU-Net + interactive 3D U-Net framework for CBCT multi-structure segmentation, achieving 0.74±0.03 pseudo-Dice (77 classes) and improving IAC Dice to 0.86.",
+			{
+				"Interactive Segmentation",
+				"Python · PyTorch · nnU-Net",
+				"https://github.com/Prs96/Interactive_Segmentation.git",
+				[]string{
+					"Built end-to-end ML pipelines for dental diagnostics and CBCT segmentation.",
+					"Designed a hybrid nnU-Net + interactive 3D U-Net framework for CBCT multi-structure segmentation, achieving 0.74±0.03 pseudo-Dice (77 classes) and improving IAC Dice to 0.86.",
+				},
 			},
-		},
-		{
-			"Stack It",
-			"TypeScript · React",
-			"https://github.com/Prs96/StackIt.git",
-			[]string{
-				"StackIt is a minimal question-and-answer platform that supports collaborative learning and structured knowledge sharing. It's designed to be simple, user-friendly, and focused on the core experience of asking and answering questions within a community.",
+			{
+				"Stack It",
+				"TypeScript · React",
+				"https://github.com/Prs96/StackIt.git",
+				[]string{
+					"StackIt is a minimal question-and-answer platform that supports collaborative learning and structured knowledge sharing. It's designed to be simple, user-friendly, and focused on the core experience of asking and answering questions within a community.",
+				},
 			},
-		},
-		{
-			"Project Five",
-			"TBD",
-			"",
-			[]string{"Placeholder — awaiting content."},
-		},
+			{
+				"Project Five",
+				"TBD",
+				"",
+				[]string{"Placeholder — awaiting content."},
+			},
 		} {
 			content += cardTop(innerW) + "\n"
 			content += headSt.Render(" "+p.name) + "\n"
@@ -426,7 +428,6 @@ func (m model) View() string {
 			content += "\n"
 		}
 
-	// ── Publications ──────────────────────────────────────────────────────────
 	case statePublications:
 		content += sectionTitle("PUBLICATIONS") + "\n\n"
 
@@ -451,7 +452,6 @@ func (m model) View() string {
 			content += venue + "\n\n"
 		}
 
-	// ── Skills ────────────────────────────────────────────────────────────────
 	case stateSkills:
 		content += sectionTitle("SKILLS & HONOURS") + "\n\n"
 
@@ -475,7 +475,6 @@ func (m model) View() string {
 			content += fmt.Sprintf("  %s  %s\n", h.badge, bodySt.Render(h.text))
 		}
 
-	// ── Contact ───────────────────────────────────────────────────────────────
 	case stateContact:
 		content += sectionTitle("CONTACT") + "\n\n"
 		content += bodySt.Render("Open to opportunities — reach out through any channel below.\n\n")
@@ -528,10 +527,53 @@ func (m model) View() string {
 	)
 }
 
+// ── SSH Bridge Entrypoint ─────────────────────────────────────────────────────
+
+func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
+	pty, _, ok := s.Pty()
+	m := initialModel()
+	if ok {
+		m.terminalWidth = pty.Window.Width
+		m.terminalHeight = pty.Window.Height
+	} else {
+		m.terminalWidth = 80
+		m.terminalHeight = 24
+	}
+	return m, []tea.ProgramOption{tea.WithAltScreen()}
+}
+
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		fmt.Printf("error: %v\n", err)
+	s, err := wish.NewServer(
+		wish.WithAddress(fmt.Sprintf("%s:%s", sshHost, sshPort)),
+		wish.WithHostKeyPath(hostKeyDir),
+		wish.WithMiddleware(
+			bubbletea.Middleware(teaHandler),
+			logging.Middleware(),
+		),
+	)
+	if err != nil {
+		fmt.Printf("could not start SSH server: %v\n", err)
 		os.Exit(1)
+	}
+
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	fmt.Printf("SSH portfolio listening on %s:%s\n", sshHost, sshPort)
+
+	go func() {
+		if err := s.ListenAndServe(); err != nil && err != ssh.ErrServerClosed {
+			fmt.Printf("server error: %v\n", err)
+			done <- syscall.SIGTERM
+		}
+	}()
+
+	<-done
+	fmt.Println("\nShutting down server gracefully...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.Shutdown(ctx); err != nil {
+		fmt.Printf("shutdown error: %v\n", err)
 	}
 }
