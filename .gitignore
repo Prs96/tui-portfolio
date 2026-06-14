@@ -33,6 +33,7 @@ tmp/
 out/
 dist/
 build/
+.ssh/*
 
 # ── Environment files (optional) ────────────────────────────────
 .env
