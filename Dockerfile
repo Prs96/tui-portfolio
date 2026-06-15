@@ -22,6 +22,11 @@ COPY --from=builder /app/portfolio .
 RUN mkdir -p .ssh && chown -R appuser:appuser .ssh
 USER appuser
 
+# Force truecolor so lipgloss renders hex colors correctly over SSH
+ENV TERM=xterm-256color
+ENV COLORTERM=truecolor
+
 # Expose the internal port defined in main.go
 EXPOSE 23234
 CMD ["./portfolio"]
+

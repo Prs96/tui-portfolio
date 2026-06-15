@@ -9,12 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // ── SSH server config ─────────────────────────────────────────────────────────
@@ -53,14 +54,16 @@ type model struct {
 	terminalHeight int
 	frame          int // animation frame counter
 	quoteIdx       int // current quote index for welcome page
+	renderer       *lipgloss.Renderer // session-scoped renderer
 }
 
-func initialModel() model {
+func initialModel(renderer *lipgloss.Renderer) model {
 	return model{
 		state:    stateMenu,
 		choices:  []string{"About Me", "Projects", "Publications", "Skills", "Contact"},
 		cursor:   0,
 		quoteIdx: 0,
+		renderer: renderer,
 	}
 }
 
@@ -88,7 +91,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.state = stateMenu
 			m.cursor = 0
-		// Added explicit matches for standard ANSI escape sequences common over raw SSH pipes
 		case "up", "k", "\x1b[A":
 			if m.cursor > 0 {
 				m.cursor--
@@ -108,8 +110,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-func rule(width int, col lipgloss.Color) string {
-	return lipgloss.NewStyle().Foreground(col).Render(strings.Repeat("─", width))
+func (m model) rule(width int, col lipgloss.Color) string {
+	return m.renderer.NewStyle().Foreground(col).Render(strings.Repeat("─", width))
 }
 
 func padR(s string, w int) string {
@@ -128,35 +130,6 @@ func maxInt(a, b int) int {
 }
 
 // ── ASCII art ─────────────────────────────────────────────────────────────────
-
-func coffeeFrames() [2][]string {
-	return [2][]string{
-		{
-			"  )  )  ) ",
-			" (  (  (  ",
-			"  )  )  ) ",
-			" .---------. ",
-			" |  ( (    | ",
-			" |  ) )  ) |_|",
-			" |  ( (  (  |_)",
-			" `-----------'",
-			"   `---------'",
-			"",
-		},
-		{
-			" )  )  )  ",
-			"  (  (  ( ",
-			" )  )  )  ",
-			" .---------. ",
-			" |  ) )    | ",
-			" |  ( (  ( |_|",
-			" |  ) )  ) |_)",
-			" `-----------'",
-			"   `---------'",
-			"",
-		},
-	}
-}
 
 func coffeeArt(frame int) []string {
 	steams := [2][3]string{
@@ -197,20 +170,22 @@ func (m model) View() string {
 		return "\n  Terminal too small — please resize to at least 90 × 18."
 	}
 
+	r := m.renderer
+
 	// ── Palette ──────────────────────────────────────────────────────────────
 	emerald := lipgloss.Color("#10B981")
-	violet := lipgloss.Color("#A78BFA")
-	teal := lipgloss.Color("#2DD4BF")
-	silver := lipgloss.Color("#CBD5E1")
-	muted := lipgloss.Color("#475569")
-	dim := lipgloss.Color("#1E293B")
-	white := lipgloss.Color("#F1F5F9")
-	amber := lipgloss.Color("#FBBF24")
+	violet  := lipgloss.Color("#A78BFA")
+	teal    := lipgloss.Color("#2DD4BF")
+	silver  := lipgloss.Color("#CBD5E1")
+	muted   := lipgloss.Color("#475569")
+	dim     := lipgloss.Color("#1E293B")
+	white   := lipgloss.Color("#F1F5F9")
+	amber   := lipgloss.Color("#FBBF24")
 
 	// ── Dimensions ───────────────────────────────────────────────────────────
 	sidebarOuter := 28
 	sidebarInner := sidebarOuter - 4
-	boxHeight := m.terminalHeight - 5
+	boxHeight    := m.terminalHeight - 5
 	contentOuter := m.terminalWidth - sidebarOuter - 1 - 4
 	if contentOuter < 56 {
 		contentOuter = 56
@@ -218,35 +193,35 @@ func (m model) View() string {
 	innerW := contentOuter - 10
 
 	// ── Base styles ──────────────────────────────────────────────────────────
-	titleSt := lipgloss.NewStyle().Bold(true).Foreground(emerald)
-	headSt := lipgloss.NewStyle().Bold(true).Foreground(white)
-	bodySt := lipgloss.NewStyle().Foreground(silver)
-	hintSt := lipgloss.NewStyle().Foreground(muted).Italic(true)
-	tagSt := lipgloss.NewStyle().Foreground(teal)
-	dateSt := lipgloss.NewStyle().Foreground(teal).Italic(true)
-	lblSt := lipgloss.NewStyle().Bold(true).Foreground(silver)
-	selText := lipgloss.NewStyle().Foreground(violet).Bold(true)
-	selMark := lipgloss.NewStyle().Foreground(violet).Bold(true)
-	steamSt := lipgloss.NewStyle().Foreground(amber)
-	cupSt := lipgloss.NewStyle().Foreground(lipgloss.Color("#92400E"))
-	nameSt := lipgloss.NewStyle().Bold(true).Foreground(emerald)
+	titleSt := r.NewStyle().Bold(true).Foreground(emerald)
+	headSt  := r.NewStyle().Bold(true).Foreground(white)
+	bodySt  := r.NewStyle().Foreground(silver)
+	hintSt  := r.NewStyle().Foreground(muted).Italic(true)
+	tagSt   := r.NewStyle().Foreground(teal)
+	dateSt  := r.NewStyle().Foreground(teal).Italic(true)
+	lblSt   := r.NewStyle().Bold(true).Foreground(silver)
+	selText := r.NewStyle().Foreground(violet).Bold(true)
+	selMark := r.NewStyle().Foreground(violet).Bold(true)
+	steamSt := r.NewStyle().Foreground(amber)
+	cupSt   := r.NewStyle().Foreground(lipgloss.Color("#92400E"))
+	nameSt  := r.NewStyle().Bold(true).Foreground(emerald)
 
 	// ── Sidebar ───────────────────────────────────────────────────────────────
 	badgeInner := sidebarInner - 2
-	nameLine := lipgloss.NewStyle().Bold(true).Foreground(emerald).
+	nameLine := r.NewStyle().Bold(true).Foreground(emerald).
 		Width(badgeInner).Align(lipgloss.Center).Render("PRANAV  S")
-	subLine := lipgloss.NewStyle().Foreground(muted).
+	subLine := r.NewStyle().Foreground(muted).
 		Width(badgeInner).Align(lipgloss.Center).Render("SOFTWARE DEVELOPER")
 
-	topBar := lipgloss.NewStyle().Foreground(emerald).Render("╔" + strings.Repeat("═", badgeInner) + "╗")
-	midName := lipgloss.NewStyle().Foreground(emerald).Render("║") + nameLine + lipgloss.NewStyle().Foreground(emerald).Render("║")
-	midSep := lipgloss.NewStyle().Foreground(muted).Render("╟" + strings.Repeat("─", badgeInner) + "╢")
-	midSub := lipgloss.NewStyle().Foreground(muted).Render("║") + subLine + lipgloss.NewStyle().Foreground(muted).Render("║")
-	botBar := lipgloss.NewStyle().Foreground(muted).Render("╚" + strings.Repeat("═", badgeInner) + "╝")
-	badge := topBar + "\n" + midName + "\n" + midSep + "\n" + midSub + "\n" + botBar
+	topBar  := r.NewStyle().Foreground(emerald).Render("╔" + strings.Repeat("═", badgeInner) + "╗")
+	midName := r.NewStyle().Foreground(emerald).Render("║") + nameLine + r.NewStyle().Foreground(emerald).Render("║")
+	midSep  := r.NewStyle().Foreground(muted).Render("╟" + strings.Repeat("─", badgeInner) + "╢")
+	midSub  := r.NewStyle().Foreground(muted).Render("║") + subLine + r.NewStyle().Foreground(muted).Render("║")
+	botBar  := r.NewStyle().Foreground(muted).Render("╚" + strings.Repeat("═", badgeInner) + "╝")
+	badge   := topBar + "\n" + midName + "\n" + midSep + "\n" + midSub + "\n" + botBar
 
 	sidebar := badge + "\n\n"
-	sidebar += lipgloss.NewStyle().Foreground(dim).Render(strings.Repeat("·", sidebarInner)) + "\n\n"
+	sidebar += r.NewStyle().Foreground(dim).Render(strings.Repeat("·", sidebarInner)) + "\n\n"
 
 	icons := []string{"○", "○", "○", "○", "○"}
 	for i, choice := range m.choices {
@@ -257,17 +232,17 @@ func (m model) View() string {
 				selText.Render(choice))
 		} else {
 			sidebar += fmt.Sprintf("  %s  %s\n",
-				lipgloss.NewStyle().Foreground(muted).Render("  "+icons[i]),
+				r.NewStyle().Foreground(muted).Render("  "+icons[i]),
 				bodySt.Render(choice))
 		}
 	}
 
-	sidebar += "\n" + lipgloss.NewStyle().Foreground(dim).Render(strings.Repeat("·", sidebarInner)) + "\n\n"
+	sidebar += "\n" + r.NewStyle().Foreground(dim).Render(strings.Repeat("·", sidebarInner)) + "\n\n"
 	sidebar += hintSt.Render("  ↑ k   up") + "\n"
 	sidebar += hintSt.Render("  ↓ j   down") + "\n"
 	sidebar += hintSt.Render("  q     quit")
 
-	sidebarBox := lipgloss.NewStyle().
+	sidebarBox := r.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(muted).
 		Padding(1, 2).
@@ -277,11 +252,11 @@ func (m model) View() string {
 
 	// ── Content helpers ───────────────────────────────────────────────────────
 	sectionTitle := func(text string) string {
-		bar := lipgloss.NewStyle().Foreground(emerald).Render("▌")
-		return bar + titleSt.Render(" "+text) + "\n" + rule(innerW, dim)
+		bar := r.NewStyle().Foreground(emerald).Render("▌")
+		return bar + titleSt.Render(" "+text) + "\n" + m.rule(innerW, dim)
 	}
 	cardTop := func(w int) string {
-		return lipgloss.NewStyle().Foreground(muted).Render("┌" + strings.Repeat("─", w-1))
+		return r.NewStyle().Foreground(muted).Render("┌" + strings.Repeat("─", w-1))
 	}
 
 	var content string
@@ -289,7 +264,7 @@ func (m model) View() string {
 	switch m.state {
 
 	case stateMenu:
-		cup := coffeeArt(m.frame)
+		cup  := coffeeArt(m.frame)
 		name := pranavASCII()
 
 		cupRendered := make([]string, len(cup))
@@ -306,15 +281,15 @@ func (m model) View() string {
 			nameRendered[i] = nameSt.Render(row)
 		}
 
-		cupBlock := strings.Join(cupRendered, "\n")
+		cupBlock  := strings.Join(cupRendered, "\n")
 		nameBlock := strings.Join(nameRendered, "\n")
 
-		centreStyle := lipgloss.NewStyle().Width(innerW).Align(lipgloss.Center)
+		centreStyle := r.NewStyle().Width(innerW).Align(lipgloss.Center)
 
 		content += "\n"
 		content += centreStyle.Render(nameBlock) + "\n\n"
 		content += centreStyle.Render(cupBlock) + "\n\n"
-		content += rule(innerW, dim) + "\n"
+		content += m.rule(innerW, dim) + "\n"
 
 		quotes := []string{
 			"\"The best way to predict the future is to invent it.\"",
@@ -322,7 +297,7 @@ func (m model) View() string {
 			"\"First, solve the problem. Then, write the code.\"",
 			"\"In the middle of difficulty lies opportunity.\"",
 		}
-		quoteSt := lipgloss.NewStyle().Foreground(amber).Italic(true).Width(innerW - 4).Align(lipgloss.Center)
+		quoteSt := r.NewStyle().Foreground(amber).Italic(true).Width(innerW - 4).Align(lipgloss.Center)
 		content += "\n" + centreStyle.Render(quoteSt.Render(quotes[m.quoteIdx]))
 
 	case stateAboutMe:
@@ -333,7 +308,7 @@ func (m model) View() string {
 		content += bodySt.Render("I work with ") + tagSt.Render("Machine Learning, AI, and Software Development") +
 			bodySt.Render(", with interests in computer vision, automation, and intelligent systems. I enjoy building projects that combine research and engineering to solve practical problems, while continuously exploring new technologies and development tools.") + "\n\n"
 
-		content += rule(innerW, dim) + "\n\n"
+		content += m.rule(innerW, dim) + "\n\n"
 		content += sectionTitle("EXPERIENCE") + "\n\n"
 
 		content += cardTop(innerW) + "\n"
@@ -431,7 +406,7 @@ func (m model) View() string {
 	case statePublications:
 		content += sectionTitle("PUBLICATIONS") + "\n\n"
 
-		content += rule(innerW, dim) + "\n"
+		content += m.rule(innerW, dim) + "\n"
 		for _, p := range []struct{ title, venue, url string }{
 			{
 				"Automated Multi-Structure Segmentation in Dental CBCT\n   using nnU-Net with Interactive IAC Refinement",
@@ -463,8 +438,8 @@ func (m model) View() string {
 			content += fmt.Sprintf("  %s  %s\n", lblSt.Render(row.label), bodySt.Render(row.value))
 		}
 
-		content += "\n" + rule(innerW, dim) + "\n"
-		content += lipgloss.NewStyle().Bold(true).Foreground(violet).Render("▌") +
+		content += "\n" + m.rule(innerW, dim) + "\n"
+		content += r.NewStyle().Bold(true).Foreground(violet).Render("▌") +
 			lblSt.Render(" HONOURS") + "\n\n"
 		for _, h := range []struct{ badge, text string }{
 			{"🏆", "Finalist — Odoo National Level Hackathon"},
@@ -478,7 +453,7 @@ func (m model) View() string {
 	case stateContact:
 		content += sectionTitle("CONTACT") + "\n\n"
 		content += bodySt.Render("Open to opportunities — reach out through any channel below.\n\n")
-		content += rule(innerW, dim) + "\n\n"
+		content += m.rule(innerW, dim) + "\n\n"
 
 		for _, c := range []struct {
 			icon, label, value, url string
@@ -493,16 +468,16 @@ func (m model) View() string {
 				val = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", c.url, bodySt.Render(c.value))
 			}
 			content += fmt.Sprintf("  %s  %s  %s\n",
-				lipgloss.NewStyle().Foreground(teal).Render(c.icon),
+				r.NewStyle().Foreground(teal).Render(c.icon),
 				lblSt.Render(padR(c.label, 9)),
 				val)
 		}
 
-		content += "\n\n" + rule(innerW, dim) + "\n"
+		content += "\n\n" + m.rule(innerW, dim) + "\n"
 		content += hintSt.Render("  Node status: online · listening for connections")
 	}
 
-	contentBox := lipgloss.NewStyle().
+	contentBox := r.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(emerald).
 		Padding(1, 4).
@@ -512,11 +487,11 @@ func (m model) View() string {
 
 	// ── Status bar ────────────────────────────────────────────────────────────
 	sections := []string{"Welcome", "About Me", "Projects", "Publications", "Skills", "Contact"}
-	leftPart := hintSt.Render("  pranav-s.dev  ·  q quit  ·  ↑↓ navigate")
+	leftPart  := hintSt.Render("  pranav-s.dev  ·  q quit  ·  ↑↓ navigate")
 	rightPart := hintSt.Render(sections[m.state] + "  ")
-	barW := m.terminalWidth - 4
-	spacer := strings.Repeat(" ", maxInt(0, barW-lipgloss.Width(leftPart)-lipgloss.Width(rightPart)))
-	statusBar := lipgloss.NewStyle().Foreground(muted).Render(leftPart + spacer + rightPart)
+	barW      := m.terminalWidth - 4
+	spacer    := strings.Repeat(" ", maxInt(0, barW-lipgloss.Width(leftPart)-lipgloss.Width(rightPart)))
+	statusBar := r.NewStyle().Foreground(muted).Render(leftPart + spacer + rightPart)
 
 	// ── Assemble ──────────────────────────────────────────────────────────────
 	dashboard := lipgloss.JoinHorizontal(lipgloss.Top, sidebarBox, contentBox)
@@ -531,7 +506,11 @@ func (m model) View() string {
 
 func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 	pty, _, ok := s.Pty()
-	m := initialModel()
+
+	renderer := bubbletea.MakeRenderer(s)
+	renderer.SetColorProfile(termenv.TrueColor)
+
+	m := initialModel(renderer)
 	if ok {
 		m.terminalWidth = pty.Window.Width
 		m.terminalHeight = pty.Window.Height
@@ -539,7 +518,11 @@ func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 		m.terminalWidth = 80
 		m.terminalHeight = 24
 	}
-	return m, []tea.ProgramOption{tea.WithAltScreen()}
+
+	return m, []tea.ProgramOption{
+		tea.WithAltScreen(),
+		tea.WithOutput(renderer.Output()),
+	}
 }
 
 func main() {
