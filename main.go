@@ -21,7 +21,7 @@ import (
 
 const (
 	sshHost    = "0.0.0.0"
-	sshPort    = "443"
+	sshPort    = "23234"
 	hostKeyDir = ".ssh/portfolio_ed25519"
 )
 
@@ -484,8 +484,8 @@ func (m model) View() string {
 			icon, label, value, url string
 		}{
 			{"✉", "Email   ", "pranavsudheesh34@gmail.com", ""},
-			{"⌥", "GitHub  ", "github.com/pranav", "https://github.com/pranav"},
-			{"in", "LinkedIn", "linkedin.com/in/pranav", "https://linkedin.com/in/pranav"},
+			{"⌥", "GitHub  ", "github.com/pranav", "https://github.com/Prs96"},
+			{"in", "LinkedIn", "linkedin.com/in/pranav", "https://www.linkedin.com/in/s-pranav-s/"},
 			{"☎", "Phone   ", "+91 89217 11927", ""},
 		} {
 			val := bodySt.Render(c.value)
